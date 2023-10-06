@@ -23,7 +23,10 @@ swh-checkout --url=<url> --commit=<sha1>
 
 If you have a SWHID:
 ```
-swh-checkout --swhid=swh:1:...
+swh-checkout --swhid="swh:1:..."
 ```
 
-The requested commit is checked out into a directory whose default name is the last part of the URL.
+Note that the SWHID must be written in double quotes to prevent it from being broken up by the shell.
+
+The requested commit is checked out into a directory whose default name is the last part of the URL. A different directory can be specified using the option `--directory`.
+

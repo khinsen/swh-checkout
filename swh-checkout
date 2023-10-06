@@ -17,27 +17,14 @@
              ((guix swh)          #:select (swh-download commit-id?))
              ((guix build git)    #:select (git-fetch)))
 
-;; The core functionality: given the URL of a Git repository and
-;; a commit hash, check out the corresponding worktree to a directory
-;; whose name is the last part of the URL. First access the Git repository
-;; directly, and if this fails, download from SWH.
+;; The core functionality: given the URL of a Git repository and a
+;; commit hash, check out the corresponding worktree to a
+;; directory. First access the Git repository directly, and if this
+;; fails, download from SWH.
 
-(define (directory-name-from-url url)
-  (car
-   (last-pair
-    (split-and-decode-uri-path
-     (uri-path
-      (string->uri
-       url))))))
-
-(define (checkout-from-url-and-commit url commit)
-  (let ((directory-name (directory-name-from-url url)))
-    (when (file-exists? directory-name)
-      (format (current-error-port)
-            "directory already exists: ~a~%" directory-name)
-      (exit 1))
-    (or (git-fetch url commit directory-name)
-        (swh-download url commit directory-name))))
+(define (checkout-from-url-and-commit url commit directory-name)
+  (or (git-fetch url commit directory-name)
+      (swh-download url commit directory-name)))
 
 ;; Extract various information from a SWHID:
 ;;  - the hash (as a string)
@@ -121,19 +108,35 @@
             "Snapshot SWHID lacks commit reference, sorry!~%")
     (exit 1)))
 
+(define (validate-directory string)
+  (when (file-exists? string)
+    (format (current-error-port)
+            "directory already exists: ~a~%" string)
+    (exit 1)))
+
+(define (directory-name-from-url url)
+  (car
+   (last-pair
+    (split-and-decode-uri-path
+     (uri-path
+      (string->uri
+       url))))))
+
 ;; Parse the command line arguments and perform the checkout.
 
 (define (main args)
   (let* ((option-spec
-          '((help    (single-char #\h) (value #f))
-            (url     (single-char #\u) (value #t))
-            (commit  (single-char #\c) (value #t))
-            (swhid   (single-char #\s) (value #t))))
+          '((help      (single-char #\h) (value #f))
+            (url       (single-char #\u) (value #t))
+            (commit    (single-char #\c) (value #t))
+            (swhid     (single-char #\s) (value #t))
+            (directory (single-char #\d) (value #t))))
          (options (getopt-long args option-spec))
          (help-wanted (option-ref options 'help #f))
          (url (option-ref options 'url #f))
          (commit (option-ref options 'commit #f))
-         (swhid (option-ref options 'swhid #f)))
+         (swhid (option-ref options 'swhid #f))
+         (directory (option-ref options 'directory #f)))
     (if help-wanted
         (display "\
 swh-checkout [options]
@@ -141,27 +144,36 @@ swh-checkout [options]
   -u, --url        URL for git repository (http or https)
   -c, --commit     Git commit (full 40-character SHA-1)
   -s, --swhid      SWHID (revision or directory, with contextual information)
+  -d, --directory  Directory in which the files are placed (default: derived from URL)
 
-Use either swhid or url plus commit.
+Use either swhid or url plus commit, not both.
 ")
         (begin
           (when url
             (validate-url url))
           (when commit
             (validate-commit commit))
-          (when swhid
-            (validate-swhid swhid))
+          (when directory
+            (validate-directory directory))
           (if swhid
               (begin
+                (validate-swhid swhid)
                 (when (or url commit)
                   (format (current-error-port)
                           "provide EITHER a swhid OR a url/commit combination~%")
                   (exit 1))
                 (let-values (((url commit) (url-and-commit-from-swhid swhid)))
-                  (checkout-from-url-and-commit url commit)))
+                  (unless directory
+                    (set! directory (directory-name-from-url url))
+                    (validate-directory directory))
+                  (checkout-from-url-and-commit url commit directory)))
               (begin
                 (if (and url commit)
-                    (checkout-from-url-and-commit url commit)
+                    (begin
+                      (unless directory
+                        (set! directory (directory-name-from-url url))
+                        (validate-directory directory))
+                      (checkout-from-url-and-commit url commit directory))
                     (begin
                       (format (current-error-port)
                               "BOTH url and commit are required~%")
