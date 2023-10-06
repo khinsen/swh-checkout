@@ -4,8 +4,10 @@ software package, identified by one of
  - a SWHID of type "dir" or "rev" with contextual attributes
  
  `swh-checkout` tries accessing the git repository first. In case of failure, it obtains the software from the [Software Heritage](https://www.softwareheritage.org/) archive.
- 
- ## Installation
+
+The intended use case is downloading precise software versions from a script or a workflow in the context of reproducible research.
+
+## Installation
  
  1. Install the [Guix package manager](https://guix.gnu.org)
  
