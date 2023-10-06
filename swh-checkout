@@ -1,0 +1,161 @@
+#!/usr/bin/env -S guix repl --
+!#
+
+(use-modules (ice-9 getopt-long)
+             (web uri)
+             (srfi srfi-11)
+             ((guix swh)          #:select (swh-download commit-id?))
+             ((guix build git)    #:select (git-fetch)))
+
+;; The core functionality: given the URL of a Git repository and
+;; a commit hash, check out the corresponding worktree to a directory
+;; whose name is the last part of the URL. First access the Git repository
+;; directly, and if this fails, download from SWH.
+
+(define (directory-name-from-url url)
+  (car
+   (last-pair
+    (split-and-decode-uri-path
+     (uri-path
+      (string->uri
+       url))))))
+
+(define (checkout-from-url-and-commit url commit)
+  (let ((directory-name (directory-name-from-url url)))
+    (when (file-exists? directory-name)
+      (format (current-error-port)
+            "directory already exists: ~a~%" directory-name)
+      (exit 1))
+    (or (git-fetch url commit directory-name)
+        (swh-download url commit directory-name))))
+
+;; Extract various information from a SWHID:
+;;  - the hash (as a string)
+;;  - the optional attributes (as an alist)
+
+(define (swhid-hash swhid)
+  (list-ref (string-split (car (string-split swhid #\;)) #\:) 3))
+
+(define (swhid-attributes swhid)
+  (define (parse-attribute attribute-string)
+    (let ((parts (string-split attribute-string #\=)))
+      (cons (string->symbol (car parts))
+            (cadr parts))))
+  (map parse-attribute (cdr (string-split swhid #\;))))
+
+;; Extract the origin URL and the commit hash from the optional
+;; attributes of a SWHID of type "rev".
+
+(define (url-and-commit-from-rev-swhid swhid)
+  (let ((attributes (swhid-attributes swhid)))
+    (unless (assoc 'origin attributes)
+      (format (current-error-port)
+              "SWHID missing origin attribute: ~a~%" swhid)
+      (exit 1))
+    (values (cdr (assoc 'origin attributes))
+            (swhid-hash swhid))))
+
+;; Extract the origin URL and the commit hash from the optional
+;; attributes of a SWHID of type "dir".
+
+(define (url-and-commit-from-dir-swhid swhid)
+  (let ((attributes (swhid-attributes swhid)))
+    (unless (assoc 'anchor attributes)
+      (format (current-error-port)
+              "SWHID missing anchor attribute: ~a~%" swhid)
+      (exit 1))
+    (unless (assoc 'origin attributes)
+      (format (current-error-port)
+              "SWHID missing origin attribute: ~a~%" swhid)
+      (exit 1))
+    (url-and-commit-from-rev-swhid 
+     (string-append (cdr (assoc 'anchor attributes))
+                    ";origin="
+                    (cdr (assoc 'origin attributes))))))
+
+;; Extract the origin URL and the commit hash from the optional
+;; attributes of a SWHID. Fail for a "snp"-type SWHID, which lacks
+;; the required attributes.
+
+(define (url-and-commit-from-swhid swhid)
+  (let ((swhid-type (substring swhid 6 9)))
+    (if (string= swhid-type "rev")
+        (url-and-commit-from-rev-swhid swhid)
+      (if (string= swhid-type "dir")
+          (url-and-commit-from-dir-swhid swhid)
+          (values #f #f)))))
+
+;; Validate the command-line arguments. The tests are very basic and
+;; supposed to catch only the most specific problems.
+
+(define (validate-commit string)
+  (unless (commit-id? string)
+    (format (current-error-port)
+            "not a full SHA1: ~a~%" string)
+    (exit 1)))
+
+(define (validate-url string)
+  (unless (or (string-prefix? "http://" string)
+              (string-prefix? "https://" string))
+    (format (current-error-port)
+            "not a valid http(s) URL: ~a~%" string)
+    (exit 1)))
+
+(define (validate-swhid string)
+  (unless (string-prefix? "swh:1:" string)
+    (format (current-error-port)
+            "not a SWHID V1: ~a~%" string)
+    (exit 1))
+  (when (string-prefix? "swh:1:snp:" string)
+    (format (current-error-port)
+            "Snapshot SWHID lacks commit reference, sorry!~%")
+    (exit 1)))
+
+;; Parse the command line arguments and perform the checkout.
+
+(define (main args)
+  (let* ((option-spec
+          '((help    (single-char #\h) (value #f))
+            (url     (single-char #\u) (value #t))
+            (commit  (single-char #\c) (value #t))
+            (swhid   (single-char #\s) (value #t))))
+         (options (getopt-long args option-spec))
+         (help-wanted (option-ref options 'help #f))
+         (url (option-ref options 'url #f))
+         (commit (option-ref options 'commit #f))
+         (swhid (option-ref options 'swhid #f)))
+    (if help-wanted
+        (display "\
+swh-checkout [options]
+  -h, --help       Display this help
+  -u, --url        URL for git repository (http or https)
+  -c, --commit     Git commit (full 40-character SHA-1)
+  -s, --swhid      SWHID (revision or directory, with contextual information)
+
+Use either swhid or url plus commit.
+")
+        (begin
+          (when url
+            (validate-url url))
+          (when commit
+            (validate-commit commit))
+          (when swhid
+            (validate-swhid swhid))
+          (if swhid
+              (begin
+                (when (or url commit)
+                  (format (current-error-port)
+                          "provide EITHER a swhid OR a url/commit combination~%")
+                  (exit 1))
+                (let-values (((url commit) (url-and-commit-from-swhid swhid)))
+                  (checkout-from-url-and-commit url commit)))
+              (begin
+                (if (and url commit)
+                    (checkout-from-url-and-commit url commit)
+                    (begin
+                      (format (current-error-port)
+                              "BOTH url and commit are required~%")
+                      (exit 1)))))
+          (exit 0)))))
+
+(main (command-line))
