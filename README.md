@@ -12,3 +12,18 @@ software package, identified by one of
  2. Download `swh-checkout`, make it executable (`chmod a+x swh-checkout`), and move it to a directory on the `$PATH` variable of your shell.
 
 The Guix package manager is required because `swh-checkout` uses part of its code. In fact, it is little more than a user interface to Guix functionality that is not exposed otherwise.
+
+## Usage
+
+If you have the URL of a git repository plus a commit hash:
+
+```
+swh-checkout --url=<url> --commit=<sha1>
+```
+
+If you have a SWHID:
+```
+swh-checkout --swhid=swh:1:...
+```
+
+The requested commit is checked out into a directory whose default name is the last part of the URL.
