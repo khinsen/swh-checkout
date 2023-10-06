@@ -17,6 +17,9 @@
              ((guix swh)          #:select (swh-download commit-id?))
              ((guix build git)    #:select (git-fetch)))
 
+;; swh-download-archive is not exported by (guix swh)
+(define swh-download-archive (@@ (guix swh) swh-download-archive))
+
 ;; The core functionality: given the URL of a Git repository and a
 ;; commit hash, check out the corresponding worktree to a
 ;; directory. First access the Git repository directly, and if this
@@ -159,16 +162,24 @@ Use either swhid or url plus commit, not both.
                   (format (current-error-port)
                           "provide EITHER a swhid OR a url/commit combination~%")
                   (exit 1))
-                (unless directory
-                  (catch 'swhid-error
-                    (lambda ()
-                      (let-values (((url commit) (url-and-commit-from-swhid swhid)))
-                        (checkout-from-url-and-commit url commit directory)
-                        (set! directory (directory-name-from-url url))))
-                    (lambda (key . args)
-                      (display (car args) (current-error-port))
-                      (exit 1)))
-                  (validate-directory directory)))
+                (catch 'swhid-error
+                  (lambda ()
+                    (let-values (((url commit) (url-and-commit-from-swhid swhid)))
+                      (unless directory
+                        (set! directory (directory-name-from-url url))
+                        (validate-directory directory))
+                      (checkout-from-url-and-commit url commit directory)))
+                  (lambda (key . args)
+                    (unless directory
+                      (display "No directory specified and no URL In SWHID"
+                               (current-error-port))
+                      (exit 1))
+                    (let ((swhid-type (substring swhid 6 9)))
+                      (if (string= swhid-type "dir")
+                          (swh-download-archive swhid directory)
+                          (begin
+                            (format (current-error-port)
+                                    "cannot download SWHID of type rev or snp~%")))))))
               (begin
                 (if (and url commit)
                     (begin
