@@ -28,6 +28,9 @@ If you have a SWHID:
 swh-checkout --swhid="swh:1:..."
 ```
 
-Note that the SWHID must be written in double quotes if it contains contextual attributes, to prevent it from being broken up by the shell.
+Note that the SWHID *must* be written in double quotes if it contains contextual attributes, to prevent it from being broken up by the shell. Otherwise the double quotes are optional.
 
-The requested commit is checked out into a directory whose default name is the last part of the URL (if provided). A different directory can be specified using the option `--directory`.
+The requested commit is checked out into a directory whose default name is the last part of the URL (if provided). A different directory can be specified using the option `--directory`. If you provide a SWHID that does not contain the origin URL, `swh-checkout` cannot infer a target directory name, making `--directory` compulsory.
+
+As a safety measure, `swh-checkout` fails if the target directory already exists.
+

@@ -29,6 +29,17 @@
   (or (git-fetch url commit directory-name)
       (swh-download url commit directory-name)))
 
+;; In the absence of a URL or commit hash, access SWH directly. This requires
+;; slightly different techniques for "rev" and "dir" type SWHIDs.
+
+(define (checkout-from-swhid swhid directory)
+  (let ((swhid-type (substring swhid 6 9)))
+    (if (string= swhid-type "dir")
+        (swh-download-archive swhid directory
+                              #:archive-type 'flat)
+        (swh-download-archive swhid directory
+                              #:archive-type 'git-bare))))
+
 ;; Extract various information from a SWHID:
 ;;  - the hash (as a string)
 ;;  - the optional attributes (as an alist)
@@ -124,7 +135,7 @@
       (string->uri
        url))))))
 
-;; Parse the command line arguments and perform the checkout.
+;; Parse the command line arguments, validate them, and perform the checkout.
 
 (define (main args)
   (let* ((option-spec
@@ -145,10 +156,10 @@ swh-checkout [options]
   -h, --help       Display this help
   -u, --url        URL for git repository (http or https)
   -c, --commit     Git commit (full 40-character SHA-1)
-  -s, --swhid      SWHID (revision or directory, with contextual information)
+  -s, --swhid      SWHID (revision or directory)
   -d, --directory  Directory in which the files are placed (default: derived from URL)
 
-Use either swhid or url plus commit, not both.
+Provide either swhid or url plus commit, not both.
 ")
         (begin
           (when url
@@ -158,13 +169,16 @@ Use either swhid or url plus commit, not both.
           (when directory
             (validate-directory directory))
           (if swhid
-              (begin
+              (begin ;; swhid given
                 (validate-swhid swhid)
                 (when (or url commit)
                   (format (current-error-port)
                           "provide EITHER a swhid OR a url/commit combination~%")
                   (exit 1))
                 (catch 'swhid-error
+                  ;; Exceptions can be thrown by url-and-commit-from-swhid
+                  ;; if the SWHID is missing the attributes that indicate
+                  ;; URL and commit.
                   (lambda ()
                     (let-values (((url commit) (url-and-commit-from-swhid swhid)))
                       (unless directory
@@ -172,26 +186,24 @@ Use either swhid or url plus commit, not both.
                         (validate-directory directory))
                       (checkout-from-url-and-commit url commit directory)))
                   (lambda (key . args)
+                    ;; If such an exception occurs, the only remaining
+                    ;; option is downloading directly from SWH.
+                    ;; This requires an explicit --directory argument.
                     (unless directory
-                      (display "No directory specified and no URL In SWHID"
-                               (current-error-port))
+                      (format (current-error-port)
+                              "No directory specified and no URL in SWHID~%")
                       (exit 1))
-                    (let ((swhid-type (substring swhid 6 9)))
-                      (if (string= swhid-type "dir")
-                          (swh-download-archive swhid directory
-                                                #:archive-type 'flat)
-                          (swh-download-archive swhid directory
-                                                #:archive-type 'git-bare))))))
-              (begin
+                    (checkout-from-swhid swhid directory))))
+              (begin ;; no swhid given
                 (if (and url commit)
-                    (begin
+                    (begin ;; url and commit given
                       (unless directory
                         (set! directory (directory-name-from-url url))
                         (validate-directory directory))
                       (checkout-from-url-and-commit url commit directory))
-                    (begin
+                    (begin ;; url or commit missing
                       (format (current-error-port)
-                              "BOTH url and commit are required~%")
+                              "Both url and commit are required~%")
                       (exit 1)))))
           (exit 0)))))
 
