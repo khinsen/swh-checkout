@@ -46,9 +46,8 @@
 (define (url-and-commit-from-rev-swhid swhid)
   (let ((attributes (swhid-attributes swhid)))
     (unless (assoc 'origin attributes)
-      (format (current-error-port)
-              "SWHID missing origin attribute: ~a~%" swhid)
-      (exit 1))
+      (throw 'swhid-error
+       (format #f "SWHID missing origin attribute: ~a~%" swhid)))
     (values (cdr (assoc 'origin attributes))
             (swhid-hash swhid))))
 
@@ -58,13 +57,11 @@
 (define (url-and-commit-from-dir-swhid swhid)
   (let ((attributes (swhid-attributes swhid)))
     (unless (assoc 'anchor attributes)
-      (format (current-error-port)
-              "SWHID missing anchor attribute: ~a~%" swhid)
-      (exit 1))
+      (throw 'swhid-error
+       (format #f "SWHID missing anchor attribute: ~a~%" swhid)))
     (unless (assoc 'origin attributes)
-      (format (current-error-port)
-              "SWHID missing origin attribute: ~a~%" swhid)
-      (exit 1))
+      (throw 'swhid-error
+       (format #f "SWHID missing origin attribute: ~a~%" swhid)))
     (url-and-commit-from-rev-swhid 
      (string-append (cdr (assoc 'anchor attributes))
                     ";origin="
@@ -162,11 +159,16 @@ Use either swhid or url plus commit, not both.
                   (format (current-error-port)
                           "provide EITHER a swhid OR a url/commit combination~%")
                   (exit 1))
-                (let-values (((url commit) (url-and-commit-from-swhid swhid)))
-                  (unless directory
-                    (set! directory (directory-name-from-url url))
-                    (validate-directory directory))
-                  (checkout-from-url-and-commit url commit directory)))
+                (unless directory
+                  (catch 'swhid-error
+                    (lambda ()
+                      (let-values (((url commit) (url-and-commit-from-swhid swhid)))
+                        (checkout-from-url-and-commit url commit directory)
+                        (set! directory (directory-name-from-url url))))
+                    (lambda (key . args)
+                      (display (car args) (current-error-port))
+                      (exit 1)))
+                  (validate-directory directory)))
               (begin
                 (if (and url commit)
                     (begin
