@@ -78,9 +78,9 @@
   (let ((swhid-type (substring swhid 6 9)))
     (if (string= swhid-type "rev")
         (url-and-commit-from-rev-swhid swhid)
-      (if (string= swhid-type "dir")
-          (url-and-commit-from-dir-swhid swhid)
-          (values #f #f)))))
+        (if (string= swhid-type "dir")
+            (url-and-commit-from-dir-swhid swhid)
+            (values #f #f)))))
 
 ;; Validate the command-line arguments. The tests are very basic and
 ;; supposed to catch only the most specific problems.
@@ -103,10 +103,12 @@
     (format (current-error-port)
             "not a SWHID V1: ~a~%" string)
     (exit 1))
-  (when (string-prefix? "swh:1:snp:" string)
-    (format (current-error-port)
-            "Snapshot SWHID lacks commit reference, sorry!~%")
-    (exit 1)))
+  (let ((swhid-type (substring string 6 9)))
+    (unless (or (string= "dir" swhid-type)
+                (string= "rev" swhid-type))
+      (format (current-error-port)
+              "SWHID must be of type 'dir' or 'rev'~%")
+      (exit 1))))
 
 (define (validate-directory string)
   (when (file-exists? string)
@@ -176,10 +178,10 @@ Use either swhid or url plus commit, not both.
                       (exit 1))
                     (let ((swhid-type (substring swhid 6 9)))
                       (if (string= swhid-type "dir")
-                          (swh-download-archive swhid directory)
-                          (begin
-                            (format (current-error-port)
-                                    "cannot download SWHID of type rev or snp~%")))))))
+                          (swh-download-archive swhid directory
+                                                #:archive-type 'flat)
+                          (swh-download-archive swhid directory
+                                                #:archive-type 'git-bare))))))
               (begin
                 (if (and url commit)
                     (begin
